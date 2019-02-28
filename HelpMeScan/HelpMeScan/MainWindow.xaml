@@ -27,6 +27,7 @@
         <Button Grid.Column="1" Grid.Row="2" Width="152" Margin="19,0,19,193" Grid.RowSpan="3" Content="Clip" FontSize="18" FontFamily="Segoe UI Semibold" Click="Classify_OnClick"/>
         <Button Grid.Column="1" Grid.Row="4" Margin="19,43,19,150" Content="Time Bookmark" FontSize="15" Click="Bookmark_Click" FontFamily="Segoe UI Semibold"/>
         <Button Grid.Column="4" Grid.Row="2" Width="152" Margin="58,0,77,193" Grid.RowSpan="3" Content="Play" FontSize="18" FontFamily="Segoe UI Semibold" Click="EveSSO_Click"/>
-    </Grid>
+        <ComboBox  Name="ComboBox"  Grid.Column="4" HorizontalAlignment="Left" Margin="10,10,0,0" Grid.Row="1" FontSize="12" VerticalAlignment="Top" Width="228" Height="28"/>
+       </Grid>
 </Window>
 
