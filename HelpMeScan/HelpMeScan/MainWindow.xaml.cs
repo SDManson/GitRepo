@@ -51,11 +51,11 @@ namespace HelpMeScan
 
 
 
-        private int? _eveClientId = null;
+        public int? _eveClientId = null;
         public IntPtr? _eveMainWindow = null;
 
 
-        private List<String> Players = new List<string>()
+        public List<String> Players = new List<string>()
         {
             "Studley Maniac",
             "Charles Manson-666",
@@ -89,9 +89,11 @@ namespace HelpMeScan
 
         public MainWindow()
         {
-            //string sss = Extensions.Julian4();
+            
             log4net.Config.XmlConfigurator.Configure();
             InitializeComponent();
+
+            
             _eveClientId = Extensions.GetEveOnlineClientProcessId();
             _eveMainWindow = Extensions.GetEveMainWindow();
             ComboBox.ItemsSource = Players;
@@ -131,7 +133,7 @@ namespace HelpMeScan
         private void Classify_OnClick(object sender, RoutedEventArgs e)
         {
             Log.Debug(new StackFrame(0, true));
-
+            Clipboard.Clear();
             Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
             var response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
             do
@@ -144,23 +146,26 @@ namespace HelpMeScan
         public void MeasurementReceived(BotEngine.Interface.FromProcessMeasurement<IMemoryMeasurement> measurement)
         {
             Log.Debug(new StackFrame(0, true));
+            Clipboard.Clear();
             WindowsInput.InputSimulator sim = new WindowsInput.InputSimulator();
             var overview = measurement?.Value.WindowOverview.FirstOrDefault();
-            var entry = overview.ListView.Entry.Where(x =>
+            var entry = overview.ListView.Entry.First(x =>
                 Regex.IsMatch(x.LabelText.ElementAt(2).Text, @"Wormhole [A-Z]"));
-            string toSearch = entry.First().LabelText.ElementAt(2).Text.Split(' ')[1];
+            string toSearch = entry.LabelText.ElementAt(2).Text.Split(' ')[1];
             string Hole = (toSearch.Contains("K162")) ? "UNK" : Worm.GetHole(toSearch);
             var scanResults = measurement?.Value.WindowProbeScanner.First().ScanResultView.Entry.FirstOrDefault();
             string scanID = scanResults?.LabelText.ElementAt(1).Text.Substring(0, 3);
 
-            string ClipString = "{0} {1} {2}";
+            string ClipString = "{0} {1}";
             if (Regex.IsMatch(Hole, @"Barbican|Conflux|Redoubt|Sentinel|Vidette")) scanID = "Drifter";
-            ClipString = string.Format(ClipString, scanID, Hole, Extensions.Julian4());
-            
+            ClipString = string.Format(ClipString, scanID, Hole );//, Extensions.Julian4());
+            bool isEOL = false;
+           
             if (Hole.Contains("UNK"))
             {
                 var motor = new WindowMotor(_eveMainWindow.Value);
-                ShowInfo(overview.ListView.Entry.FirstOrDefault(x => x.LabelText.ElementAt(2).Text.Contains("Wormhole")),measurement);
+                ShowInfo(overview.ListView.Entry.First(x =>Regex.IsMatch(x.LabelText.ElementAt(2).Text, @"Wormhole [A-Z]")),measurement);
+                //ShowInfo(overview.ListView.Entry.FirstOrDefault(x => x.LabelText.ElementAt(2).Text.Contains("Wormhole")),measurement);
                 Sanderling.Interface.FromInterfaceResponse response = null;
                 do
                 {
@@ -173,13 +178,18 @@ namespace HelpMeScan
                 {
                     motor.MouseClick(InfoWindow.RegionCenter().Value, MouseButtonIdEnum.Left);
 
-                    
+#if true
                     sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_A).Sleep(200);
                     sim.Keyboard.KeyUp(VirtualKeyCode.VK_A).KeyUp(VirtualKeyCode.CONTROL).Sleep(200);
                     sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_C).Sleep(200);
                     sim.Keyboard.KeyUp(VirtualKeyCode.VK_C).KeyUp(VirtualKeyCode.CONTROL).Sleep(200);
                     sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_W).Sleep(200);
                     sim.Keyboard.KeyUp(VirtualKeyCode.VK_W).KeyUp(VirtualKeyCode.CONTROL);
+#else
+                    SelectAndCopy(sim);
+                    sim.Keyboard.Sleep(200).KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_W).Sleep(200);
+                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_W).KeyUp(VirtualKeyCode.CONTROL);
+#endif
                 }
                 catch (Exception e)
                 {
@@ -187,16 +197,13 @@ namespace HelpMeScan
                     throw;
                 }
 
-                bool isEOL = false;
-                Results = Classify(ClipString,out isEOL);
+                Results = Classify(ClipString, out isEOL);
                 try
                 {
-                    RunAsStaThread(() =>
-                    {
-                        Clipboard.SetText(string.IsNullOrEmpty(Results)
-                            ? ClipString + (isEOL ? "eol" : "")
-                            : Results + (isEOL ? "eol" : ""));
-                    });
+                    RunAsStaThread(() =>                     
+                        Clipboard.SetText(string.IsNullOrEmpty(Results) ? ClipString : Results));
+                       
+                    
 
                 }
                 catch (COMException e)
@@ -211,19 +218,21 @@ namespace HelpMeScan
             {
                 try
                 {
-                    RunAsStaThread(() => Clipboard.SetText(ClipString));
+                    
+                    RunAsStaThread(() => 
+                        Clipboard.SetText(string.IsNullOrEmpty(Results) ? ClipString : Results)); 
                 }
                 catch (COMException  e)
                 {
-                     
+                    IntPtr hwnd = GetOpenClipboardWindow();
+                    Log.Debug(hwnd.ToString());
                 }
             }
-            //Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
-            Bookmark(string.IsNullOrEmpty(Results) ? ClipString : Results);
+             Bookmark(string.IsNullOrEmpty(Results) ? ClipString : Results,isEOL);
             /// Use this as a way of saying my program is done reset the 
             /// ScanHelper program foreground
            
-            Thread.Sleep(500);
+            Thread.Sleep(50);
             SetForegroundWindow(new System.Windows.Interop.WindowInteropHelper(App.Current.MainWindow).Handle);
         }
 
@@ -235,26 +244,32 @@ namespace HelpMeScan
             motor.ActSequenceMotion(motionParam.AsSequenceMotion(measurement?.Value));
             motionParam.KeyDown = motionParam.KeyUp = new[] { VirtualKeyCode.VK_T };
             motor.ActSequenceMotion(motionParam.AsSequenceMotion(measurement?.Value));
+
             return;
         }
 
-        public void Bookmark(string BookmarkName)
+        public void Bookmark(string BookmarkName,bool isEOL)
         {
+
+            
             Sanderling.Interface.FromInterfaceResponse response = null;
             do
             {
                 response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
-                Thread.Sleep(250);
             } while (null == response);
 
+            BookmarkName += (isEOL) ? " eol" + Extensions.Julian4() : Extensions.Julian4();
             var overview = response.MemoryMeasurement?.Value.WindowOverview.FirstOrDefault();
-            var entry = overview.ListView.Entry.FirstOrDefault();//x => x.LabelText.ElementAt(2).Text.Contains("Concentrated"));
+            var entry = overview.ListView.Entry.FirstOrDefault();
             entry.MouseClick(MouseButtonIdEnum.Left);
 
             WindowsInput.InputSimulator sim = new InputSimulator();
             Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
-            sim.Keyboard.KeyPress(VirtualKeyCode.CAPITAL).Sleep(500).TextEntry(BookmarkName).KeyPress(VirtualKeyCode.RETURN);
+            sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_B).Sleep(200);
+            sim.Keyboard.KeyUp(VirtualKeyCode.VK_B).KeyUp(VirtualKeyCode.CONTROL).Sleep(200).TextEntry(BookmarkName).KeyPress(VirtualKeyCode.RETURN);
 
+            
+            
         }
 
 
@@ -307,16 +322,16 @@ namespace HelpMeScan
 
             List<VirtualKeyCode> workAll = new List<VirtualKeyCode>(selectall);
             workAll.AddRange(selectall);
-            selectall.ForEach((p) => sim.Keyboard.KeyDown(p));
+            selectall.ForEach((p) => sim.Keyboard.KeyDown(p).Sleep(200));
             selectall.Reverse();
-            selectall.ForEach((p) => sim.Keyboard.KeyUp(p));
+            selectall.ForEach((p) => sim.Keyboard.KeyUp(p).Sleep(200));
 
         }
 
         private void Bookmark_Click(object sender, RoutedEventArgs e)
         {
             Log.Debug(new StackFrame(0, true));
-            Sanderling.Interface.FromInterfaceResponse response = null;
+            Sanderling.Interface.FromInterfaceResponse response;
             do
             {
                 response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
@@ -329,7 +344,10 @@ namespace HelpMeScan
 
             WindowsInput.InputSimulator sim = new InputSimulator();
             Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
-            sim.Keyboard.KeyPress(VirtualKeyCode.CAPITAL).Sleep(500).TextEntry(DateTime.Now.ToString("HHmm")).KeyPress(VirtualKeyCode.RETURN);
+            string BookmarkName = DateTime.Now.ToString("HHmm");
+            sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_B).Sleep(200);
+            sim.Keyboard.KeyUp(VirtualKeyCode.VK_B).KeyUp(VirtualKeyCode.CONTROL).Sleep(200).TextEntry(BookmarkName).KeyPress(VirtualKeyCode.RETURN);
+            //sim.Keyboard.KeyPress(VirtualKeyCode.CAPITAL).Sleep(500).TextEntry(DateTime.Now.ToString("HHmm")).KeyPress(VirtualKeyCode.RETURN);
         }
     }
 }
@@ -395,7 +413,7 @@ public static class Extensions
 
     public static string Julian4()
     {
-        return DateTime.Now.ToString("yy").Substring(1) + DateTime.Now.DayOfYear.ToString("000");
+        return string.Format(" {0}{1}",DateTime.Now.ToString("yy").Substring(1), DateTime.Now.DayOfYear.ToString("000"));
     }
 
 };
