@@ -33,6 +33,7 @@ using BotEngine.Common.Motor;
 using Window = System.Windows.Window;
 using LINQPad;
 using MouseButton = System.Windows.Input.MouseButton;
+using Clipboard = System.Windows.Forms.Clipboard;
 
 
 namespace HelpMeScan
@@ -49,10 +50,27 @@ namespace HelpMeScan
         [DllImport("user32.dll")]
         static extern IntPtr GetOpenClipboardWindow();
 
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
 
-        public int? _eveClientId = null;
-        public IntPtr? _eveMainWindow = null;
+        private IntPtr? _eveMainWindow;
+        private int? _eveClientId;
+
+        public IntPtr? EveMainWindow
+        {
+            get => _eveMainWindow;
+            set => _eveMainWindow = value; 
+        }
+
+        public int? EveClientId
+        {
+            get => _eveClientId;
+            set => _eveClientId = value;
+        }
+
+
+        public string ClipString = "{0} {1}";
 
 
         public List<String> Players = new List<string>()
@@ -86,20 +104,63 @@ namespace HelpMeScan
         private static readonly log4net.ILog Log =
             log4net.LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
 
+        ///-----------------------------------------------------------------------------
+        /// <summary>
+        /// Gets the Process that's holding the clipboard
+        /// </summary>
+        /// <returns>A Process object holding the clipboard, or null</returns>
+        ///-----------------------------------------------------------------------------
+        public Process ProcessHoldingClipboard()
+        {
+            Process theProc = null;
+
+            IntPtr hwnd = GetOpenClipboardWindow();
+
+            if (hwnd != IntPtr.Zero)
+            {
+                uint processId;
+                uint threadId = GetWindowThreadProcessId(hwnd, out processId);
+
+                Process[] procs = Process.GetProcesses();
+                foreach (Process proc in procs)
+                {
+                    IntPtr handle = proc.MainWindowHandle;
+
+                    if (handle == hwnd)
+                    {
+                        theProc = proc;
+                    }
+                    else if (processId == proc.Id)
+                    {
+                        theProc = proc;
+                    }
+                }
+            }
+
+            return theProc;
+        }
+
+
+
 
         public MainWindow()
         {
-            
+
+
+            this.Left = 13.0;
+            this.Top = 198.0;
+
             log4net.Config.XmlConfigurator.Configure();
             InitializeComponent();
 
+            //Clipboard.Clear();
             
-            _eveClientId = Extensions.GetEveOnlineClientProcessId();
-            _eveMainWindow = Extensions.GetEveMainWindow();
+            EveClientId = Extensions.GetEveOnlineClientProcessId();
+            EveMainWindow = Extensions.GetEveMainWindow();
             ComboBox.ItemsSource = Players;
             ComboBox.SelectedIndex = 0;
             sensor = new Sensor();
-            string fmt = $"Inside MainWindow eveClient {_eveClientId:X8} eveMainWindow {_eveMainWindow:X8}";
+            string fmt = $"Inside MainWindow eveClient {EveClientId:X8} eveMainWindow {_eveMainWindow:X8}";
             Log.Debug(fmt);
            
         }
@@ -108,18 +169,93 @@ namespace HelpMeScan
         public string ClientID = $"272ec715901c47a3b555c77ee7ed5e3f";
         public string SecretKey = $"Zf8YKDFe8GbbTBEPu8wpC7CIl513YUXFtZqMu8Dk";
         public string CallBack = $"https://localhost/callback";
+        
 
         private void EveSSO_Click(object sender, RoutedEventArgs e)
         {
-            Log.Debug("inside SSO_Click");
-            System.Timers.Timer tm = new System.Timers.Timer();
-            tm.Interval = 10 * 60_0000; // 10 minutes
-            tm.Elapsed += TimerFired;
-            tm.Start();
+            //Log.Debug("inside SSO_Click");
+            //System.Timers.Timer tm = new System.Timers.Timer();
+            //tm.Interval = 10 * 60_0000; // 10 minutes
+            //tm.Elapsed += TimerFired;
+            //tm.Start();
+        }
+        private void BookmarkByOverview(string BookmarkName)
+        { 
+            IMemoryMeasurement measurement;
+            WindowMotor motor = new WindowMotor(_eveMainWindow.Value);
+            Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
+            var response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+            do
+            {
+                response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+            } while (null == response);
+
+            measurement = response?.MemoryMeasurement?.Value;
+            var overview = measurement.WindowOverview.FirstOrDefault();
+
+            var entry = overview.ListView.Entry.FirstOrDefault();
+            var motionParam = entry.MouseClick(MouseButtonIdEnum.Right);
+
+            motor.ActSequenceMotion(motionParam.AsSequenceMotion(measurement));
+
+
+            do
+            {
+                response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+            } while (null == response);
+            measurement = response?.MemoryMeasurement?.Value;
+            Sanderling.Interface.MemoryStruct.IMenu menu = measurement.Menu.FirstOrDefault();
+            BookmarkByMenu(measurement,menu,"Save Location",BookmarkName);
+
 
 
         }
 
+        private void BookmarkByMenu(IMemoryMeasurement measure,IMenu menu,string WhichOne,string BookName)
+        {
+            WindowMotor motor = new WindowMotor(_eveMainWindow.Value);
+            IMemoryMeasurement measureme;
+            MotionParam motionParam;
+            var response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+            if (null == menu)
+            {
+                do
+                {
+                    //motionParam = menuEntry.MouseClick(MouseButtonIdEnum.Left);
+                    //motor.ActSequenceMotion(motionParam.AsSequenceMotion(measure));
+                    response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+
+                } while (null == response.MemoryMeasurement.Value.Menu);
+
+                menu = response.MemoryMeasurement.Value.Menu.First();
+            }
+
+            //measureme = response?.MemoryMeasurement?.Value;
+            //var mParam = measureme.WindowOverview.First().ListView.Entry.FirstOrDefault().MouseClick(MouseButtonIdEnum.Right);
+            //motor.ActSequenceMotion(mParam.AsSequenceMotion(measureme));
+            //    menu = measure.Menu.First();
+            //}
+            //IMenu menu = measure.Menu.First();
+            var menuEntry = menu.Entry.FirstOrDefault(x=> Regex.IsMatch(x.Text, WhichOne));
+            //x => x.Text.Contains(WhichOne));
+            motionParam = menuEntry.MouseClick(MouseButtonIdEnum.Left);
+            motor.ActSequenceMotion(motionParam.AsSequenceMotion(measure));
+            //var response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
+            //do
+            //{
+            //    response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
+            //} while (null == response);
+            //measure = response?.MemoryMeasurement?.Value;
+            //var BookWindow = measure.WindowOther.First(x => Regex.IsMatch(x.Caption, "New Location"));
+            //var BookWindowLabel = BookWindow.InputText;
+            WindowsInput.InputSimulator sim = new InputSimulator();
+            sim.Keyboard.TextEntry(BookName).Sleep(200).KeyPress(VirtualKeyCode.RETURN);
+            
+
+
+
+
+        }
         private static void TimerFired(object sender, ElapsedEventArgs e)
         {
             Log.Debug(new StackFrame(0,true));
@@ -133,20 +269,31 @@ namespace HelpMeScan
         private void Classify_OnClick(object sender, RoutedEventArgs e)
         {
             Log.Debug(new StackFrame(0, true));
-            Clipboard.Clear();
-            Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
-            var response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
-            do
-            {
-                response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
-            } while (null == response);
-            MeasurementReceived(response?.MemoryMeasurement);
+
+           /// Rect r = this.RestoreBounds;
+            //double Top, Left, Right, Bottom;
+            //Top = this.Top;
+            //Left = this.Left;
+            
+            Bookmarker bm=new Bookmarker(EveMainWindow.Value,EveClientId.Value);
+
+
+            //sensor = new Sensor();
+            //Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
+            //var response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+            //do
+            //{
+            //    response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+            //} while (null == response);
+            //MeasurementReceived(response?.MemoryMeasurement);
+            //sensor = null;
         }
 
         public void MeasurementReceived(BotEngine.Interface.FromProcessMeasurement<IMemoryMeasurement> measurement)
         {
             Log.Debug(new StackFrame(0, true));
-            Clipboard.Clear();
+            
+
             WindowsInput.InputSimulator sim = new WindowsInput.InputSimulator();
             var overview = measurement?.Value.WindowOverview.FirstOrDefault();
             var entry = overview.ListView.Entry.First(x =>
@@ -156,7 +303,7 @@ namespace HelpMeScan
             var scanResults = measurement?.Value.WindowProbeScanner.First().ScanResultView.Entry.FirstOrDefault();
             string scanID = scanResults?.LabelText.ElementAt(1).Text.Substring(0, 3);
 
-            string ClipString = "{0} {1}";
+            
             if (Regex.IsMatch(Hole, @"Barbican|Conflux|Redoubt|Sentinel|Vidette")) scanID = "Drifter";
             ClipString = string.Format(ClipString, scanID, Hole );//, Extensions.Julian4());
             bool isEOL = false;
@@ -165,75 +312,82 @@ namespace HelpMeScan
             {
                 var motor = new WindowMotor(_eveMainWindow.Value);
                 ShowInfo(overview.ListView.Entry.First(x =>Regex.IsMatch(x.LabelText.ElementAt(2).Text, @"Wormhole [A-Z]")),measurement);
-                //ShowInfo(overview.ListView.Entry.FirstOrDefault(x => x.LabelText.ElementAt(2).Text.Contains("Wormhole")),measurement);
-                Sanderling.Interface.FromInterfaceResponse response = null;
+               Sanderling.Interface.FromInterfaceResponse response = null;
                 do
                 {
-                    response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
+                    response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
                 } while (null == response);
 
                 var InfoWindow =
                     response.MemoryMeasurement?.Value.WindowOther.First(x => x.Caption.Contains("formation"));
-                try
-                {
-                    motor.MouseClick(InfoWindow.RegionCenter().Value, MouseButtonIdEnum.Left);
+                SelectAndCopy(sim,InfoWindow);
+                
+                //try
+//                {
+//                    motor.MouseClick(InfoWindow.RegionCenter().Value, MouseButtonIdEnum.Left);
 
-#if true
-                    sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_A).Sleep(200);
-                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_A).KeyUp(VirtualKeyCode.CONTROL).Sleep(200);
-                    sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_C).Sleep(200);
-                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_C).KeyUp(VirtualKeyCode.CONTROL).Sleep(200);
-                    sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_W).Sleep(200);
-                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_W).KeyUp(VirtualKeyCode.CONTROL);
-#else
-                    SelectAndCopy(sim);
-                    sim.Keyboard.Sleep(200).KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_W).Sleep(200);
-                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_W).KeyUp(VirtualKeyCode.CONTROL);
-#endif
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine(e);
-                    throw;
-                }
+//#if true
+//                    sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_A).Sleep(200);
+//                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_A).KeyUp(VirtualKeyCode.CONTROL).Sleep(200);
+//                    sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_C).Sleep(200);
+//                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_C).KeyUp(VirtualKeyCode.CONTROL).Sleep(200);
+                    
+//                    sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_W).Sleep(200);
+//                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_W).KeyUp(VirtualKeyCode.CONTROL);
+//#else
+//                    SelectAndCopy(sim);
+//                    sim.Keyboard.Sleep(200).KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_W).Sleep(200);
+//                    sim.Keyboard.KeyUp(VirtualKeyCode.VK_W).KeyUp(VirtualKeyCode.CONTROL);
+//#endif
+//                }
+//                catch (Exception e)
+//                {
+//                    Console.WriteLine(e);
+//                    throw;
+//                }
 
                 Results = Classify(ClipString, out isEOL);
-                try
-                {
-                    RunAsStaThread(() =>                     
-                        Clipboard.SetText(string.IsNullOrEmpty(Results) ? ClipString : Results));
-                       
+                //try
+                //{
+                //    Process pr = ProcessHoldingClipboard();
+                //    if(pr!=null)
+                //    Log.Debug(pr.MainModule.FileName);
+                //   //RunAsStaThread(() => Clipboard.SetText(string.IsNullOrEmpty(Results) ? ClipString : Results));
+                  
+                //}
+                //catch (Exception e)
+                //{
                     
-
-                }
-                catch (COMException e)
-                {
-                    IntPtr hwnd=GetOpenClipboardWindow();
-                    Log.Debug(hwnd.ToString());
-                }
+                    
+                //}
 
               
             }
             else
             {
-                try
-                {
-                    
-                    RunAsStaThread(() => 
-                        Clipboard.SetText(string.IsNullOrEmpty(Results) ? ClipString : Results)); 
-                }
-                catch (COMException  e)
-                {
-                    IntPtr hwnd = GetOpenClipboardWindow();
-                    Log.Debug(hwnd.ToString());
-                }
+            //    try
+            //    {
+            //        Process pr = ProcessHoldingClipboard();
+            //        if(pr!=null)
+            //        Log.Debug(pr.MainModule.FileName);
+            //      //  RunAsStaThread(() => Clipboard.SetText(string.IsNullOrEmpty(Results) ? ClipString : Results)); 
+            //    }
+            //    catch (COMException  e)
+            //    {
+            //        IntPtr hwnd = GetOpenClipboardWindow();
+            //        Log.Debug(hwnd.ToString());
+            //    }
             }
-             Bookmark(string.IsNullOrEmpty(Results) ? ClipString : Results,isEOL);
+             //Bookmark(string.IsNullOrEmpty(Results) ? ClipString : Results,isEOL);
+             string Name = (string.IsNullOrEmpty(Results)) ? ClipString : Results;
+             Name+= ((isEOL) ? " eol" + Extensions.Julian4() : Extensions.Julian4());
+            BookmarkByOverview(Name);
             /// Use this as a way of saying my program is done reset the 
             /// ScanHelper program foreground
            
             Thread.Sleep(50);
             SetForegroundWindow(new System.Windows.Interop.WindowInteropHelper(App.Current.MainWindow).Handle);
+         //   App.Current.MainWindow.Close();
         }
 
         public void ShowInfo(Sanderling.Interface.MemoryStruct.IOverviewEntry entry, BotEngine.Interface.FromProcessMeasurement<IMemoryMeasurement> measurement)
@@ -250,26 +404,37 @@ namespace HelpMeScan
 
         public void Bookmark(string BookmarkName,bool isEOL)
         {
-
-            
+            // sensor = new Sensor();
+            WindowMotor m = new WindowMotor(_eveMainWindow.Value);
             Sanderling.Interface.FromInterfaceResponse response = null;
             do
             {
-                response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
+                response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
             } while (null == response);
-
+            
             BookmarkName += (isEOL) ? " eol" + Extensions.Julian4() : Extensions.Julian4();
             var overview = response.MemoryMeasurement?.Value.WindowOverview.FirstOrDefault();
             var entry = overview.ListView.Entry.FirstOrDefault();
-            entry.MouseClick(MouseButtonIdEnum.Left);
+            var motionParam = entry.MouseClick(MouseButtonIdEnum.Left);
+            m.ActSequenceMotion(motionParam.AsSequenceMotion(response.MemoryMeasurement?.Value));
+            do
+            {
+                response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
+            } while (null == response);
 
-            WindowsInput.InputSimulator sim = new InputSimulator();
-            Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
-            sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_B).Sleep(200);
-            sim.Keyboard.KeyUp(VirtualKeyCode.VK_B).KeyUp(VirtualKeyCode.CONTROL).Sleep(200).TextEntry(BookmarkName).KeyPress(VirtualKeyCode.RETURN);
+            var menu = response.MemoryMeasurement?.Value.Menu.FirstOrDefault();
+            BookmarkByMenu(response.MemoryMeasurement?.Value,menu,"Save Location",BookmarkName+" 00");
 
-            
-            
+
+            //WindowsInput.InputSimulator sim = new InputSimulator();
+            //Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
+            //sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_B).Sleep(200);
+            //sim.Keyboard.KeyUp(VirtualKeyCode.VK_B).KeyUp(VirtualKeyCode.CONTROL).Sleep(200).TextEntry(BookmarkName).KeyPress(VirtualKeyCode.RETURN);
+
+            //sim.Keyboard.KeyPress(VirtualKeyCode.RETURN);
+            //sensor = null;
+
+
         }
 
 
@@ -277,6 +442,7 @@ namespace HelpMeScan
         {
             Log.Debug(new StackFrame(0, true));
             string tempstring = Clipboard.GetText();
+            Clipboard.Clear();
             isEol= Regex.IsMatch(tempstring, @"reaching the end");
 
             if (Replace(ref work, tempstring, out string replace))
@@ -314,8 +480,10 @@ namespace HelpMeScan
             return !string.IsNullOrEmpty(replace);
         }
 
-        private static void SelectAndCopy(WindowsInput.InputSimulator sim)
+        private void SelectAndCopy(WindowsInput.InputSimulator sim,IWindow infoWindow)
         {
+            var motor = new WindowMotor(EveMainWindow.Value);
+            motor.MouseClick(infoWindow.RegionCenter().Value, MouseButtonIdEnum.Left);
             Log.Debug(new StackFrame(0, true));
             List<VirtualKeyCode> selectall = new List<VirtualKeyCode>() { VirtualKeyCode.CONTROL, VirtualKeyCode.VK_A };
             List<VirtualKeyCode> copyit = new List<VirtualKeyCode>() { VirtualKeyCode.CONTROL, VirtualKeyCode.VK_C };
@@ -331,11 +499,11 @@ namespace HelpMeScan
         private void Bookmark_Click(object sender, RoutedEventArgs e)
         {
             Log.Debug(new StackFrame(0, true));
+            //sensor = new Sensor();
             Sanderling.Interface.FromInterfaceResponse response;
             do
             {
-                response = sensor?.MeasurementTakeNewRequest(_eveClientId.Value);
-                Thread.Sleep(250);
+                response = sensor?.MeasurementTakeNewRequest(EveClientId.Value);
             } while (null == response);
 
             var overview = response.MemoryMeasurement?.Value.WindowOverview.FirstOrDefault();
@@ -344,10 +512,10 @@ namespace HelpMeScan
 
             WindowsInput.InputSimulator sim = new InputSimulator();
             Sanderling.Motor.WindowMotor.EnsureWindowIsForeground(_eveMainWindow.Value);
-            string BookmarkName = DateTime.Now.ToString("HHmm");
             sim.Keyboard.KeyDown(VirtualKeyCode.CONTROL).KeyDown(VirtualKeyCode.VK_B).Sleep(200);
-            sim.Keyboard.KeyUp(VirtualKeyCode.VK_B).KeyUp(VirtualKeyCode.CONTROL).Sleep(200).TextEntry(BookmarkName).KeyPress(VirtualKeyCode.RETURN);
+            sim.Keyboard.KeyUp(VirtualKeyCode.VK_B).KeyUp(VirtualKeyCode.CONTROL).Sleep(200).TextEntry(DateTime.Now.ToString("HHmm")).KeyPress(VirtualKeyCode.RETURN);
             //sim.Keyboard.KeyPress(VirtualKeyCode.CAPITAL).Sleep(500).TextEntry(DateTime.Now.ToString("HHmm")).KeyPress(VirtualKeyCode.RETURN);
+           // sensor = null;
         }
     }
 }
